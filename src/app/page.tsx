@@ -1,3 +1,15 @@
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Proposta Comercial — Crie propostas profissionais em minutos",
+  description: "Gere propostas comerciais profissionais com modelos prontos, tabela de preços automática e PDF com sua marca. A partir de R$ 19.",
+  openGraph: {
+    title: "Proposta Comercial — Crie propostas profissionais em minutos",
+    description: "Gere propostas comerciais profissionais com modelos prontos, tabela de preços automática e PDF com sua marca.",
+    type: "website",
+  },
+};
+
 import Link from "next/link";
 
 export default function HomePage() {
