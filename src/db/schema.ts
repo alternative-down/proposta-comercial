@@ -19,6 +19,19 @@ export const orders = sqliteTable('orders', {
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
+export const subscriptions = sqliteTable('subscriptions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  asaasSubscriptionId: text('asaas_subscription_id'),
+  planId: text('plan_id').notNull(),
+  status: text('status', { enum: ['active', 'cancelled', 'overdue', 'paused'] }).notNull().default('active'),
+  billingType: text('billing_type').notNull(),
+  amount: real('amount').notNull(),
+  dueDate: integer('due_date', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
 export const invoices = sqliteTable('invoices', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
@@ -31,3 +44,6 @@ export const invoices = sqliteTable('invoices', {
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
+
+// propostas is an alias for invoices (proposal = invoice in this context)
+export const propostas = invoices;
