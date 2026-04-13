@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { db } from '@/db';
-import { orders, subscriptions, users } from '@/db/schema';
+import { orders, users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { verifyToken } from '@/lib/auth';
 
 const ASAAS_API_KEY = process.env.ASAAS_API_KEY || '';
 const ASAAS_ENDPOINT = 'https://api.asaas.com/api/v3';
-const ASAAS_WEBHOOK_TOKEN = process.env.ASAAS_WEBHOOK_TOKEN || '';
 
+type PaymentMethod = 'pix' | 'boleto' | 'credit_card';
 type BillingType = 'PIX' | 'BOLETO' | 'CREDIT_CARD';
+
+const PLAN_PRICES: Record<string, number> = {
+  mensal: 49,
+  pay_per_use: 19,
+};
 
 function resolveBillingType(method?: string): BillingType {
   switch (method) {
@@ -20,168 +25,136 @@ function resolveBillingType(method?: string): BillingType {
   }
 }
 
-async function fetchPixQrCode(paymentId: string) {
-  try {
-    const res = await fetch(`${ASAAS_ENDPOINT}/payments/${paymentId}/pixQrCode`, {
-      headers: { access_token: ASAAS_API_KEY },
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
+function planLabel(planId: string): string {
+  switch (planId) {
+    case 'mensal': return 'Plano Mensal';
+    case 'pay_per_use': return 'Proposta Avulsa';
+    default: return `Plano ${planId}`;
   }
 }
 
-// Plans config
-const PLANS = {
-  avulso: { price: 19 * 100, name: 'Proposta Avulso', type: 'order' as const },
-  mensal: { price: 49 * 100, name: 'Proposta Mensal', type: 'subscription' as const },
-};
+async function createAsaasCustomer(email: string, name?: string) {
+  const res = await fetch(`${ASAAS_ENDPOINT}/customers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', access_token: ASAAS_API_KEY },
+    body: JSON.stringify({ email, name: name || email.split('@')[0] }),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function fetchPixQrCode(paymentId: string) {
+  const pixResponse = await fetch(`${ASAAS_ENDPOINT}/payments/${paymentId}/pixQrCode`, {
+    headers: { access_token: ASAAS_API_KEY },
+  });
+  if (!pixResponse.ok) return null;
+  return pixResponse.json();
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const token = (await cookies()).get('token')?.value;
-    if (!token) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    const cookieStore = await cookies();
+    const token = cookieStore.get('token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    }
     const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: 'Token inválido' }, { status: 401 });
+    if (!payload) {
+      return NextResponse.json({ error: 'Token inválido' }, { status: 401 });
+    }
 
-    const { planId, paymentMethod } = await request.json();
-    if (!planId || !['avulso', 'mensal'].includes(planId)) {
+    const { planId, paymentMethod } = (await request.json()) as {
+      planId?: string;
+      paymentMethod?: PaymentMethod;
+    };
+
+    if (!planId || !PLAN_PRICES[planId]) {
       return NextResponse.json({ error: 'Plano inválido' }, { status: 400 });
     }
 
-    // Get user
     const [user] = await db.select().from(users).where(eq(users.id, payload.userId)).limit(1);
-    if (!user) return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
-
-    const plan = PLANS[planId as keyof typeof PLANS];
-    const billingType = resolveBillingType(paymentMethod);
-
-    if (plan.type === 'order') {
-      // One-time payment (Avulso)
-      if (!ASAAS_API_KEY) return NextResponse.json({ error: 'Gateway indisponível' }, { status: 503 });
-
-      const paymentRes = await fetch(`${ASAAS_ENDPOINT}/payments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', access_token: ASAAS_API_KEY },
-        body: JSON.stringify({
-          customer: user.asaasCustomerId || undefined,
-          billingType,
-          value: plan.price / 100,
-          dueDate: new Date().toISOString().split('T')[0],
-          description: plan.name,
-          externalReference: user.id,
-          notificationDisabled: false,
-        }),
-      });
-
-      if (!paymentRes.ok) {
-        const err = await paymentRes.text();
-        return NextResponse.json({ error: `Erro Asaas: ${err}` }, { status: 502 });
-      }
-
-      const payment = await paymentRes.json();
-      const orderId = crypto.randomUUID();
-
-      await db.insert(orders).values({
-        id: orderId,
-        userId: user.id,
-        asaasPaymentId: payment.id,
-        planId,
-        amount: plan.price / 100,
-        status: 'pending',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      let pixQrCode = null;
-      if (billingType === 'PIX') {
-        pixQrCode = await fetchPixQrCode(payment.id);
-      }
-
-      return NextResponse.json({
-        type: 'order',
-        paymentId: payment.id,
-        orderId,
-        pixQrCode,
-        billingType,
-        amount: plan.price / 100,
-      });
-
-    } else {
-      // Subscription (Mensal)
-      if (!ASAAS_API_KEY) return NextResponse.json({ error: 'Gateway indisponível' }, { status: 503 });
-
-      // Ensure Asaas customer
-      let customerId = user.asaasCustomerId;
-      if (!customerId) {
-        const customerRes = await fetch(`${ASAAS_ENDPOINT}/customers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', access_token: ASAAS_API_KEY },
-          body: JSON.stringify({ email: user.email, name: user.email.split('@')[0] }),
-        });
-        if (customerRes.ok) {
-          const customer = await customerRes.json();
-          customerId = customer.id;
-          await db.update(users).set({ asaasCustomerId: customerId }).where(eq(users.id, user.id));
-        }
-      }
-
-      const subRes = await fetch(`${ASAAS_ENDPOINT}/subscriptions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', access_token: ASAAS_API_KEY },
-        body: JSON.stringify({
-          customer: customerId,
-          billingType,
-          nextDueDate: new Date().toISOString().split('T')[0],
-          value: plan.price / 100,
-          cycle: 'MONTHLY',
-          description: plan.name,
-          externalReference: user.id,
-          notificationDisabled: false,
-        }),
-      });
-
-      if (!subRes.ok) {
-        const err = await subRes.text();
-        return NextResponse.json({ error: `Erro Asaas: ${err}` }, { status: 502 });
-      }
-
-      const subscription = await subRes.json();
-      const subId = crypto.randomUUID();
-
-      await db.insert(subscriptions).values({
-        id: subId,
-        userId: user.id,
-        asaasSubscriptionId: subscription.id,
-        planId,
-        status: 'inactive',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      // Fetch payment for PIX QR code
-      const subPayments = await fetch(`${ASAAS_ENDPOINT}/subscriptions/${subscription.id}/payments`, {
-        headers: { access_token: ASAAS_API_KEY },
-      });
-      let pixQrCode = null;
-      if (subPayments.ok && billingType === 'PIX') {
-        const paymentsData = await subPayments.json();
-        const firstPayment = paymentsData.data?.[0];
-        if (firstPayment?.id) {
-          pixQrCode = await fetchPixQrCode(firstPayment.id);
-        }
-      }
-
-      return NextResponse.json({
-        type: 'subscription',
-        subscriptionId: subscription.id,
-        subId,
-        pixQrCode,
-        billingType,
-        amount: plan.price / 100,
-      });
+    if (!user) {
+      return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
     }
+
+    let customerId = (user as Record<string, unknown>).asaasCustomerId as string | undefined;
+    if (!customerId) {
+      const customer = await createAsaasCustomer(user.email);
+      if (!customer) {
+        return NextResponse.json({ error: 'Erro ao criar conta de pagamento. Tente novamente.' }, { status: 500 });
+      }
+      customerId = customer.id;
+    }
+
+    const amount = PLAN_PRICES[planId];
+    const billingType = resolveBillingType(paymentMethod);
+    const dueDate = new Date().toISOString().split('T')[0];
+    const orderId = crypto.randomUUID();
+
+    const asaasResponse = await fetch(`${ASAAS_ENDPOINT}/payments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        access_token: ASAAS_API_KEY,
+      },
+      body: JSON.stringify({
+        billingType,
+        customer: customerId,
+        value: amount,
+        dueDate,
+        description: `Proposta Comercial - ${planLabel(planId)}`,
+        externalReference: orderId,
+      }),
+    });
+
+    if (!asaasResponse.ok) {
+      const err = await asaasResponse.text();
+      console.error('Asaas error:', err);
+      return NextResponse.json({ error: 'Erro ao criar pagamento' }, { status: 500 });
+    }
+
+    const asaasData = await asaasResponse.json();
+
+    await db.insert(orders).values({
+      id: orderId,
+      userId: payload.userId,
+      planId,
+      billingType,
+      amount,
+      status: 'pending',
+      asaasPaymentId: asaasData.id,
+      dueDate: new Date(`${dueDate}T00:00:00.000Z`),
+      createdAt: new Date(),
+    });
+
+    const responseBody: Record<string, unknown> = {
+      orderId,
+      paymentId: asaasData.id,
+      paymentMethod: paymentMethod || 'pix',
+      billingType,
+      amount,
+      invoiceUrl: asaasData.invoiceUrl || null,
+    };
+
+    if (billingType === 'PIX') {
+      const pixData = await fetchPixQrCode(asaasData.id);
+      responseBody.pix = {
+        encodedImage: pixData?.encodedImage || null,
+        payload: pixData?.payload || pixData?.qrCode || pixData?.qrCodeUrl || null,
+        expirationDate: pixData?.expirationDate || null,
+      };
+    }
+
+    if (billingType === 'BOLETO') {
+      responseBody.boleto = {
+        bankSlipUrl: asaasData.bankSlipUrl || null,
+        invoiceUrl: asaasData.invoiceUrl || null,
+        identificationField: asaasData.identificationField || null,
+        barCode: asaasData.barCode || null,
+      };
+    }
+
+    return NextResponse.json(responseBody);
   } catch (error) {
     console.error('Checkout error:', error);
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 });

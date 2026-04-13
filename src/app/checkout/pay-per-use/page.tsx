@@ -1,15 +1,6 @@
 'use client';
 import { Suspense, useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-
-const PLAN_LABELS: Record<string, string> = {
-  mensal: 'Mensal',
-};
-
-const PLAN_PRICES: Record<string, number> = {
-  mensal: 49,
-};
 
 type PaymentMethod = 'pix' | 'boleto' | 'credit_card';
 
@@ -33,9 +24,7 @@ interface CheckoutResult {
   };
 }
 
-function CheckoutContent() {
-  const searchParams = useSearchParams();
-  const planId = searchParams.get('plan') || 'mensal';
+function PayPerUseContent() {
   const [method, setMethod] = useState<PaymentMethod>('pix');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CheckoutResult | null>(null);
@@ -84,7 +73,7 @@ function CheckoutContent() {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planId, paymentMethod: method }),
+        body: JSON.stringify({ planId: 'pay_per_use', paymentMethod: method }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -99,8 +88,7 @@ function CheckoutContent() {
     }
   }
 
-  const price = PLAN_PRICES[planId] || 49;
-  const label = PLAN_LABELS[planId] || 'Mensal';
+  const price = 19;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -115,17 +103,17 @@ function CheckoutContent() {
       </header>
 
       <main className="max-w-xl mx-auto px-6 py-10">
-        <h1 className="text-2xl font-bold text-slate-900 mb-2">Assinar plano {label}</h1>
-        <p className="text-slate-600 mb-8">R$ {price}/mês — cobrado uma única vez e renovado mensalmente.</p>
+        <h1 className="text-2xl font-bold text-slate-900 mb-2">Comprar proposta avulsa</h1>
+        <p className="text-slate-600 mb-8">Pagamento único. Você recebe 1 proposta completa após a confirmação.</p>
 
         {/* Order summary */}
         <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-6">
           <div className="flex justify-between items-center">
             <div>
-              <div className="font-semibold text-slate-900">Plano {label}</div>
+              <div className="font-semibold text-slate-900">Proposta Avulsa</div>
               <div className="text-sm text-slate-500">Proposta Comercial</div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">R$ {price}</div>
+            <div className="text-2xl font-bold text-slate-900">R$ 19</div>
           </div>
         </div>
 
@@ -223,7 +211,7 @@ function CheckoutContent() {
             ) : null}
 
             <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-sm text-amber-700">
-              <strong>Atenção:</strong> O plano será ativado automaticamente após a confirmação do pagamento. Não feche esta página.
+              <strong>Atenção:</strong> A proposta será disponibilizada automaticamente após a confirmação do pagamento. Não feche esta página.
             </div>
 
             <Link href="/app" className="block w-full bg-slate-100 text-slate-700 font-semibold py-3 rounded-xl hover:bg-slate-200 transition text-center">
@@ -236,14 +224,14 @@ function CheckoutContent() {
   );
 }
 
-export default function CheckoutPage() {
+export default function PayPerUsePage() {
   return (
     <Suspense fallback={
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-slate-500">Carregando...</div>
       </div>
     }>
-      <CheckoutContent />
+      <PayPerUseContent />
     </Suspense>
   );
 }
