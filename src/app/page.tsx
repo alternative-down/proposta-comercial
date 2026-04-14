@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 };
 
 import Link from "next/link";
+import SocialProofSection from "@/components/SocialProofSection";
 
 export default function HomePage() {
   return (
@@ -40,6 +41,7 @@ export default function HomePage() {
             <span className="bg-amber-100 text-amber-700 text-xs font-bold px-3 py-1 rounded-full">5 minutos</span>
             <span className="bg-amber-100 text-amber-700 text-xs font-bold px-3 py-1 rounded-full">PDF profissional</span>
           </div>
+          <SocialProofSection fallback="Usado por milhares de profissionais" />
           <h1 className="text-4xl md:text-5xl font-bold text-slate-900 mb-6 leading-tight">
             Sua próxima proposta.<br />Em minutos, com cara de agência.
           </h1>
