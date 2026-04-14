@@ -14,7 +14,7 @@ export const metadata: Metadata = {
     canonical: "https://proposta.alternativedown.com.br",
   },
   openGraph: {
-    title: "Proposta Express — Propostas profissionais em minutos",
+    title: "Proposta Comercial — Crie propostas profissionais em minutos",
     description: "Gere propostas comerciais com modelos prontos, tabela de preços automática e PDF com sua marca.",
     url: "https://proposta.alternativedown.com.br",
     siteName: "Proposta Express",
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Proposta Express — Propostas profissionais em minutos",
+    title: "Proposta Comercial — Crie propostas profissionais em minutos",
     description: "Gere propostas comerciais com modelos prontos e PDF com sua marca.",
   },
   robots: { index: true, follow: true },
